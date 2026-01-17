@@ -15,30 +15,29 @@ def resolve(domain, rtype):
     except Exception:
         return []
 
+def resolve_ips(domain):
+    return {
+        r.to_text()
+        for t in ("A", "AAAA")
+        for r in resolve(domain, t)
+    }
+
 def main():
     banner()
 
-    parser = argparse.ArgumentParser(description="DNS mapper")
+    parser = argparse.ArgumentParser()
     parser.add_argument("domain", nargs="?")
     args = parser.parse_args()
 
-    domain = args.domain
+    domain = args.domain or input("Entrez le domaine : ").strip()
     if not domain:
-        domain = input("Entrez le domaine : ").strip()
-        if not domain:
-            print("Aucun domaine fourni.")
-            return
+        return
+
+    ips = resolve_ips(domain)
 
     print(f"\nAnalyse de {domain}\n")
-
-    ips = {r.to_text() for r in resolve(domain, "A")}
-
-    if ips:
-        print("IPs trouvées :")
-        for ip in ips:
-            print(f" - {ip}")
-    else:
-        print("Aucune IP trouvée.")
+    for ip in ips:
+        print(f" - {ip}")
 
 if __name__ == "__main__":
     main()
