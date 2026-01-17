@@ -1,5 +1,6 @@
 
 import dns.resolver
+import dns.reversename
 import argparse
 
 def banner():
@@ -22,6 +23,13 @@ def resolve_ips(domain):
         for r in resolve(domain, t)
     }
 
+def reverse_dns(ip):
+    try:
+        rev = dns.reversename.from_address(ip)
+        return dns.resolver.resolve(rev, "PTR")[0].to_text().rstrip(".")
+    except Exception:
+        return None
+
 def main():
     banner()
 
@@ -37,7 +45,9 @@ def main():
 
     print(f"\nAnalyse de {domain}\n")
     for ip in ips:
-        print(f" - {ip}")
+        rdns = reverse_dns(ip)
+        suffix = f" ({rdns})" if rdns else ""
+        print(f" - {ip}{suffix}")
 
 if __name__ == "__main__":
     main()
