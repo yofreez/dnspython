@@ -86,6 +86,25 @@ def get_parent_domains(domain):
 
 
 
+# -------------------------
+# Graphviz 
+# -------------------------
+def export_graphviz(file, domain, data):
+    with open(file,"w") as f:
+        f.write("digraph DNS {\n rankdir=LR; node [fontname=Helvetica];\n")
+        for k,shape in [("domains","ellipse"),("ips","box"),("parents","diamond")]:
+            for n in data[k]: f.write(f' "{n}" [shape={shape}];\n')
+        for ip in data["ips"]:
+            f.write(f' "{domain}" -> "{ip}" [label="A/AAAA"];\n')
+            if ip in data["reverse"]: f.write(f' "{ip}" -> "{data["reverse"][ip]}" [label="PTR"];\n')
+            for n in data["neighbors"].get(ip,[]): f.write(f' "{ip}" -> "{n}" [label="neighbor"];\n')
+        for s in data["srv"]: f.write(f' "{domain}" -> "{s}" [label="SRV"];\n')
+        for s in data["subdomains"]: f.write(f' "{domain}" -> "{s}" [label="subdomain"];\n')
+        for p in data["parents"]: f.write(f' "{domain}" -> "{p}" [label="parent"];\n')
+        f.write("}\n")
+
+
+
 #---------------------------
 # main
 # -------------------------
@@ -154,6 +173,14 @@ def main():
             print(f"=== {section} ===")
             for x in sorted(items): print(x)
             print()
+
+
+    # Graphviz export if requested
+    if args.graphviz:
+        export_graphviz(args.graphviz, domain, results)
+        print(f"[+] Graphviz file generated: {args.graphviz}")
+
+
 
 if __name__ == "__main__":
     main()
