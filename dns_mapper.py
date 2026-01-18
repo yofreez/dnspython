@@ -4,6 +4,10 @@ import dns.resolver
 import dns.reversename
 import argparse
 import re 
+import tldextract
+
+
+
 
 def banner():
     print("""
@@ -35,7 +39,7 @@ def reverse_dns(ip):
 
 
 #---------------------------
-# Strategies
+# Strategies de récup 
 # -------------------------
 def scan_ip_neighbors(ip):
     try:
@@ -60,93 +64,96 @@ def enumerate_subdomains(domain):
     words = ["www","api","mail","shop","news","community"]
     return {f"{w}.{domain}" for w in words if resolve(f"{w}.{domain}","A") or resolve(f"{w}.{domain}","AAAA")}
 
+def get_parent_domains(domain):
+    ext = tldextract.extract(domain)
+    if not ext.suffix or not ext.domain:
+        return set()
+    registered_domain = f"{ext.domain}.{ext.suffix}"
+    parents = set()
+    if domain == registered_domain:
+        return parents
+
+    if ext.subdomain:
+        parts = ext.subdomain.split(".")
+        current_suffix = registered_domain
+        for part in reversed(parts):
+            parent_candidate = f"{part}.{current_suffix}"
+            if parent_candidate != domain:
+                parents.add(parent_candidate)
+            current_suffix = parent_candidate
+
+    return parents
+
+
+
+#---------------------------
+# main
+# -------------------------
 
 
 def main():
     banner()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("domain", nargs="?")
+    parser = argparse.ArgumentParser(description="DNS cartography tool")
+    parser.add_argument("domain", nargs="?", help="Domain to analyze")
+    parser.add_argument("--graphviz", help=".dot output")
+    # Note: ces arguments sont déclarés mais non utilisés dans la logique,
+    parser.add_argument("--ip","--reverse","--neighbors",
+                        "--domains","--parents","--subdomains","--srv",
+                        action="store_true")
     args = parser.parse_args()
 
-    domain = args.domain or input("Entrez le domaine : ").strip()
+    # recup le domaine 
+    domain = args.domain
     if not domain:
-        print("[-] Aucun domaine fourni.")
-        return
+        domain = input("Entrez le domaine à découvrir : ").strip()
+        if not domain:
+            print("[-] Aucun domaine fourni, arrêt.")
+            return
 
-    # Collecte de toutes les données
-    ips = resolve_ips(domain)
-    srv_records = scan_srv(domain)
-    mx_records = scan_mx(domain)
-    txt_domains = parse_txt(domain)
-    subdomains = enumerate_subdomains(domain)
+    # regroupe tt les résultats
+    results = {
+        "ips": resolve_ips(domain),
+        "reverse": {},
+        "neighbors": {},
+        "domains": set(),
+        "subdomains": enumerate_subdomains(domain),
+        "srv": scan_srv(domain),
+        "parents": set()
+    }
 
-    print(f"\nAnalyse de {domain}\n")
-    
-    # IPs avec le reverse DNS
-    if ips:
-        print("=== Adresses IP ===")
-        for ip in sorted(ips):
-            rdns = reverse_dns(ip)
-            suffix = f" ({rdns})" if rdns else ""
-            print(f" - {ip}{suffix}")
-        
-        # Voisins IP
-        print("\n=== Voisins IP ===")
-        neighbor_found = False
-        for ip in sorted(ips):
-            neighbors = scan_ip_neighbors(ip)
-            if neighbors:
-                neighbor_found = True
-                print(f"  {ip}:")
-                for neighbor in neighbors:
-                    print(f"    -> {neighbor}")
-        
-        if not neighbor_found:
-            print("  Aucun voisin trouvé")
-    else:
-        print("=== Adresses IP ===")
-        print("  Aucune adresse IP trouvée")
-    
-    # Enregistrements SRV
-    print("\n=== Enregistrements SRV ===")
-    if srv_records:
-        for srv in sorted(srv_records):
-            print(f" - {srv}")
-    else:
-        print("  Aucun enregistrement SRV trouvé")
-    
-    # Serveurs MX
-    print("\n=== Serveurs Mail (MX) ===")
-    if mx_records:
-        for mx in sorted(mx_records):
-            print(f" - {mx}")
-    else:
-        print("  Aucun serveur MX trouvé")
-    
-    # Domaines dans les TXT
-    print("\n=== Domaines trouvés dans TXT ===")
-    if txt_domains:
-        for txt_domain in sorted(txt_domains):
-            print(f" - {txt_domain}")
-    else:
-        print("  Aucun domaine trouvé dans les enregistrements TXT")
-    
-    # Sous-domaines
-    print("\n=== Sous-domaines découverts ===")
-    if subdomains:
-        for sub in sorted(subdomains):
-            print(f" - {sub}")
-    else:
-        print("  Aucun sous-domaine trouvé")
-    
-    # Résumé de tout
-    print(f"\n[*] Résumé pour {domain}:")
-    print(f"    - {len(ips)} adresse(s) IP trouvée(s)")
-    print(f"    - {len(srv_records)} enregistrement(s) SRV trouvé(s)")
-    print(f"    - {len(mx_records)} serveur(s) MX trouvé(s)")
-    print(f"    - {len(txt_domains)} domaine(s) dans TXT trouvé(s)")
-    print(f"    - {len(subdomains)} sous-domaine(s) découvert(s)")
+    # Reverse + voisins
+    for ip in results["ips"]:
+        rdns = reverse_dns(ip)
+        if rdns: results["reverse"][ip] = rdns
+        results["neighbors"][ip] = scan_ip_neighbors(ip)
+
+    # Domains (MX + SRV + TXT)
+    results["domains"].update(scan_mx(domain))
+    results["domains"].update(results["srv"])
+    results["domains"].update(parse_txt(domain))
+
+    # Parent domains
+    # On scanne les parents de tout ce qu'on a trouvé
+    full_list = results["domains"].union(results["subdomains"]).union({domain})
+    for d in full_list:
+        results["parents"].update(get_parent_domains(d))
+
+
+
+
+#---------------------------
+# sortie 
+# -------------------------
+    print(f"\n[*] DNS cartography for {domain}\n")
+    for section, items in [("IPs",results["ips"]),("Reverse DNS",results["reverse"].values()),
+                           ("IP neighbors",[n for ns in results["neighbors"].values() for n in ns]),
+                           ("Domains discovered",results["domains"]),("Parent Domains",results["parents"]),
+                           ("Subdomains",results["subdomains"]),("SRV",results["srv"])]:
+        if items:
+            print(f"=== {section} ===")
+            for x in sorted(items): print(x)
+            print()
 
 if __name__ == "__main__":
     main()
