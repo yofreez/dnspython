@@ -57,8 +57,19 @@ def scan_mx(domain):
     return {r.exchange.to_text().rstrip(".") for r in resolve(domain,"MX")}
 
 def parse_txt(domain):
+    raw_txt = []
+    extracted = set()
     pattern = r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-    return {d for r in resolve(domain,"TXT") for d in re.findall(pattern,r.to_text())}
+
+    for r in resolve(domain, "TXT"):
+        txt = r.to_text()
+        raw_txt.append(txt)
+        for match in re.findall(pattern, txt):
+            extracted.add(match)
+
+    return raw_txt, extracted
+
+
 
 def enumerate_subdomains(domain):
     words = ["www","api","mail","shop","news","community"]
@@ -138,8 +149,9 @@ def main():
         "domains": set(),
         "subdomains": enumerate_subdomains(domain),
         "srv": scan_srv(domain),
-        "parents": set()
+        "parents": set(),
     }
+
 
     # Reverse + voisins
     for ip in results["ips"]:
@@ -147,10 +159,13 @@ def main():
         if rdns: results["reverse"][ip] = rdns
         results["neighbors"][ip] = scan_ip_neighbors(ip)
 
-    # Domains (MX + SRV + TXT)
+   # Domains (MX + SRV + TXT)
     results["domains"].update(scan_mx(domain))
     results["domains"].update(results["srv"])
-    results["domains"].update(parse_txt(domain))
+
+    txt_raw, txt_extracted = parse_txt(domain)
+    results["domains"].update(txt_extracted)
+
 
     # Parent domains
     # On scanne les parents de tout ce qu'on a trouvé
