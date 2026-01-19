@@ -1,4 +1,4 @@
-"""Module de cartographie DNS pour analyser les domaines et leurs relations."""
+
 import argparse
 import ipaddress
 import os
@@ -43,7 +43,9 @@ def resolve(domain: str, rtype: str) -> List[Any]:
 
 def resolve_ips(domain: str) -> Set[str]:
     """Résout les enregistrements A et AAAA pour un domaine."""
-    return {r.to_text() for t in ("A", "AAAA") for r in resolve(domain, t)}
+    return {r.to_text() 
+            for t in ("A", "AAAA")
+              for r in resolve(domain, t)}
 
 
 def reverse_dns(ip: str) -> Optional[str]:
@@ -69,6 +71,12 @@ def scan_ip_neighbors(ip: str) -> List[str]:
     except ValueError:
         pass
     return neighbors
+
+
+def resolve_cname(domain: str) -> Optional[str]:
+    """Résout l'enregistrement CNAME d'un domaine."""
+    records = resolve(domain, "CNAME")
+    return records[0].to_text().rstrip(".") if records else None
 
 
 def scan_records(domain: str) -> Tuple[Set[str], Set[str], Set[str]]:
@@ -150,6 +158,7 @@ def export_graphviz(filename: str, main_domain: str,
         "subdomains": ("#D7F9FF", "#4DA3FF", "ellipse", "Sub"),
         "domains": ("#D7FFD7", "#28A745", "hexagon", "Record"),
         "srv": ("#EAD7FF", "#6F42C1", "component", "SRV"),
+        "cname": ("#FFE4B5", "#FFA500", "parallelogram", "CNAME"),
         "parents": ("#F0F0F0", "#6C757D", "diamond", "Parent"),
     }
 
@@ -271,6 +280,14 @@ def main():
     txt_domains = parse_txt(domain)
     subdomains = enumerate_subdomains(domain)
 
+    # CNAME - Scanner tous les domaines trouvés
+    cnames = {}
+    all_to_check = subdomains.union({domain})
+    for d in all_to_check:
+        cname_target = resolve_cname(d)
+        if cname_target:
+            cnames[d] = cname_target
+
     # Reverse & Voisins
     reverse = {}
     neighbors = {}
@@ -296,6 +313,7 @@ def main():
         "neighbors": neighbors,
         "subdomains": subdomains,
         "srv": srv,
+        "cname": set(cnames.values()),
         "domains": other_domains,
         "parents": parents
     }
@@ -318,6 +336,12 @@ def main():
             print(f"\n--- {name} ---")
             for x in sorted(data):
                 print(f"  {x}")
+
+    # Affichage spécial pour CNAME avec mapping
+    if cnames:
+        print("\n--- CNAME ---")
+        for source, target in sorted(cnames.items()):
+            print(f"  {source} -> {target}")
 
     # 6. Export Graphviz (automatique)
     dot_file = f"{domain.replace('.', '_')}_diagram.dot"
