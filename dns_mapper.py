@@ -144,19 +144,19 @@ def get_parent_domains(domain: str) -> Set[str]:
 # --------------
 
 
-def export_graphviz(filename: str, main_domain: str,
-                    data: Dict[str, Any]) -> None:
-    """Exporte un diagramme Graphviz au format DOT et génère un JPG."""
-    # on fait le style
-    styles = {
+def export_graphviz(
+    filename: str,
+    main_domain: str,
+    data: Dict[str, Any],
+    styles: Dict[str, Tuple[str, str, str, str]] = {
         "ips": ("#FFD7D7", "#FF6B6B", "box", "IP"),
         "subdomains": ("#D7F9FF", "#4DA3FF", "ellipse", "Sub"),
         "domains": ("#D7FFD7", "#28A745", "hexagon", "Record"),
         "srv": ("#EAD7FF", "#6F42C1", "component", "SRV"),
         "cname": ("#FFE4B5", "#FFA500", "parallelogram", "CNAME"),
         "parents": ("#F0F0F0", "#6C757D", "diamond", "Parent"),
-    }
-
+    },
+) -> None:
     lines = [
         'digraph G {',
         '  rankdir=LR;',
