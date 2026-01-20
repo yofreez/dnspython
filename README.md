@@ -1,4 +1,3 @@
-
 # DNS Mapper
 
 Outil de reconnaissance d'infrastructure et de cartographie topologique DNS. Ce script automatise la collecte d'enregistrements DNS, la découverte de sous-domaines, l'identification de voisins IP et la génération de graphiques relationnels.
@@ -12,31 +11,31 @@ Le flux d'exécution se divise en trois phases : Collecte, Agrégation et Rendu.
 |  Entrée (CLI)  | ----> |           Moteur de Résolution          |
 |     Domaine    |       |         (dnspython / tldextract)        |
 +----------------+       +--------------------+--------------------+
-                                              |
-          +-----------------------------------+-----------------------------------+
-          |                                   |                                   |
-  [Résolution Directe]                [Énumération]                       [Pivot IP]
-  - A / AAAA (IPs)                    - Brute-force (list)                - Reverse DNS (PTR)
-  - MX, NS, TXT, SRV                  - Extraction TLD                    - Scan Voisins (+/- 1)
-  - CNAME aliases                     - Parsing TXT regex
-          |                                   |                                   |
-          +-----------------------------------+-----------------------------------+
-                                              |
-                                     +--------v--------+
-                                     |   Agrégation    |
-                                     |  & Corrélations |
-                                     +--------+--------+
-                                              |
-                    +-------------------------+-------------------------+
-                    |                                                   |
-          +---------v----------+                              +---------v---------+
-          |  Rapport Console   |                              |  Moteur Graphique |
-          | (Texte Structuré)  |                              |    (Graphviz)     |
-          +--------------------+                              +---------+---------+
-                                                                        |
-                                                                  [Fichier .DOT]
-                                                                        |
-                                                                  [Rendu .JPG]
+                                             |
+         +-----------------------------------+-----------------------------------+
+         |                                   |                                   |
+ [Résolution Directe]                [Énumération]                       [Pivot IP]
+ - A / AAAA (IPs)                    - Brute-force (list)                - Reverse DNS (PTR)
+ - MX, NS, TXT, SRV                  - Extraction TLD                    - Scan Voisins (+/- 1)
+ - CNAME aliases                     - Parsing TXT regex
+         |                                   |                                   |
+         +-----------------------------------+-----------------------------------+
+                                             |
+                                    +--------v--------+
+                                    |   Agrégation    |
+                                    |  & Corrélations |
+                                    +--------+--------+
+                                             |
+                   +-------------------------+-------------------------+
+                   |                                                   |
+         +---------v----------+                              +---------v---------+
+         |  Rapport Console   |                              |  Moteur Graphique |
+         | (Texte Structuré)  |                              |    (Graphviz)     |
+         +--------------------+                              +---------+---------+
+                                                                       |
+                                                                 [Fichier .DOT]
+                                                                       |
+                                                                 [Rendu .JPG]
 ```
 
 ## Pré-requis
@@ -112,10 +111,11 @@ Génération automatique d'un diagramme vectoriel (DOT) et matriciel (JPG) repr�
 - **Moteur** : Graphviz.
 - **Style** : `rankdir=LR` (Gauche à Droite), `splines=curved` (Lignes courbes).
 - **Code couleur** : Différenciation visuelle des IPs, sous-domaines, records et voisins.
+
 ## Linter
 
-Pour v�rifier la qualit� du code :
+Pour vérifier la qualité du code :
 
-```bash
-.venv/Scripts/flake8.exe dns_mapper.py && .venv/Scripts/pylint.exe dns_mapper.py
+```powershell
+.venv/Scripts/flake8.exe dns_mapper.py; .venv/Scripts/pylint.exe dns_mapper.py; .venv/Scripts/mypy.exe dns_mapper.py
 ```
