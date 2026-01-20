@@ -1,4 +1,3 @@
-
 import argparse
 import ipaddress
 import os
@@ -28,12 +27,11 @@ def banner() -> None:
 
 
 # -------------------------
-# Fonctions de Résolution
+#  Résolution DNS
 # -------------------------
 
 
 def resolve(domain: str, rtype: str) -> List[Any]:
-    """Wrapper sécurisé pour les requêtes DNS."""
     try:
         return list(RESOLVER.resolve(domain, rtype))
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
@@ -42,14 +40,14 @@ def resolve(domain: str, rtype: str) -> List[Any]:
 
 
 def resolve_ips(domain: str) -> Set[str]:
-    """Résout les enregistrements A et AAAA pour un domaine."""
+    #  enregistrements A et AAAA pour un domaine
     return {r.to_text() 
             for t in ("A", "AAAA")
               for r in resolve(domain, t)}
 
 
 def reverse_dns(ip: str) -> Optional[str]:
-    """Effectue une résolution DNS inverse pour une IP."""
+    # Effectue une résolution DNS inverse pour une IP
     try:
         rev = dns.reversename.from_address(ip)
         res = resolve(str(rev), "PTR")
@@ -59,7 +57,7 @@ def reverse_dns(ip: str) -> Optional[str]:
 
 
 def scan_ip_neighbors(ip: str) -> List[str]:
-    """Scan l'IP précédente et suivante."""
+    # Scan l'IP précédente et suivante
     neighbors = []
     try:
         addr = ipaddress.ip_address(ip)
@@ -74,13 +72,12 @@ def scan_ip_neighbors(ip: str) -> List[str]:
 
 
 def resolve_cname(domain: str) -> Optional[str]:
-    """Résout l'enregistrement CNAME d'un domaine."""
     records = resolve(domain, "CNAME")
     return records[0].to_text().rstrip(".") if records else None
 
 
 def scan_records(domain: str) -> Tuple[Set[str], Set[str], Set[str]]:
-    """Récupère MX, NS et SRV."""
+    # MX, NS et SRV.
     mx = {r.exchange.to_text().rstrip(".") for r in resolve(domain, "MX")}
     ns = {r.target.to_text().rstrip(".") for r in resolve(domain, "NS")}
 
@@ -95,7 +92,6 @@ def scan_records(domain: str) -> Tuple[Set[str], Set[str], Set[str]]:
 
 
 def parse_txt(domain: str) -> Set[str]:
-    """Extrait des domaines potentiels depuis les records TXT."""
     extracted = set()
     pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     for r in resolve(domain, "TXT"):
@@ -106,7 +102,7 @@ def parse_txt(domain: str) -> Set[str]:
 
 
 def enumerate_subdomains(domain: str) -> Set[str]:
-    """Énumère les sous-domaines courants."""
+# les ss-domaines courants
     words = [
         "www", "api", "mail", "shop", "admin", "dev", "test", "staging",
         "prod", "app", "web", "backend", "frontend", "mobile", "blog",
@@ -125,7 +121,6 @@ def enumerate_subdomains(domain: str) -> Set[str]:
 
 
 def get_parent_domains(domain: str) -> Set[str]:
-    """Extrait les domaines parents d'un domaine donné."""
     ext = tldextract.extract(domain)
     if not ext.suffix or not ext.domain:
         return set()
@@ -146,7 +141,7 @@ def get_parent_domains(domain: str) -> Set[str]:
 
 # -------------------------
 # Graphviz
-# -------------------------
+# --------------
 
 
 def export_graphviz(filename: str, main_domain: str,
@@ -259,11 +254,20 @@ def export_graphviz(filename: str, main_domain: str,
 
 
 def main():
-    """Fonction principale du programme."""
+
     banner()
     parser = argparse.ArgumentParser()
     parser.add_argument("domain", nargs="?", help="Domaine cible")
     parser.add_argument("--graphviz", help="Fichier de sortie .dot")
+    parser.add_argument("--ips", action="store_true", help="Afficher les IPs")
+    parser.add_argument("--reverse", action="store_true", help="Afficher les reverse DNS")
+    parser.add_argument("--neighbors", action="store_true", help="Afficher les voisins IP")
+    parser.add_argument("--subdomains", action="store_true", help="Afficher les sous-domaines")
+    parser.add_argument("--records", action="store_true", help="Afficher les records (MX/NS/TXT)")
+    parser.add_argument("--srv", action="store_true", help="Afficher les records SRV")
+    parser.add_argument("--cname", action="store_true", help="Afficher les CNAME")
+    parser.add_argument("--parents", action="store_true", help="Afficher les domaines parents")
+    parser.add_argument("--all", action="store_true", help="Afficher tous les résultats")
     args = parser.parse_args()
 
     domain = args.domain
@@ -318,32 +322,39 @@ def main():
         "parents": parents
     }
 
-    # 5. Affichage
+    #  Affichage conditionnel
     print(f"\n=== RAPPORT {domain} ===")
     neighbor_list = [n for neighbor_ips in neighbors.values()
                      for n in neighbor_ips]
+    
+    # Déterminer quoi afficher
+    show_all = args.all or not any([args.ips, args.reverse, args.neighbors, 
+                                     args.subdomains, args.records, args.srv, 
+                                     args.cname, args.parents])
+    
     sections = [
-        ("IPs", ips),
-        ("Reverse", reverse.values()),
-        ("Voisins", neighbor_list),
-        ("Sous-domaines", subdomains),
-        ("Records (MX/NS/TXT)", other_domains),
-        ("SRV", srv),
-        ("Parents", parents)
+        ("IPs", ips, args.ips or show_all),
+        ("Reverse", reverse.values(), args.reverse or show_all),
+        ("Voisins", neighbor_list, args.neighbors or show_all),
+        ("Sous-domaines", subdomains, args.subdomains or show_all),
+        ("Records (MX/NS/TXT)", other_domains, args.records or show_all),
+        ("SRV", srv, args.srv or show_all),
+        ("Parents", parents, args.parents or show_all)
     ]
-    for name, data in sections:
-        if data:
+    
+    for name, data, show in sections:
+        if show and data:
             print(f"\n--- {name} ---")
             for x in sorted(data):
                 print(f"  {x}")
 
     # Affichage spécial pour CNAME avec mapping
-    if cnames:
+    if (args.cname or show_all) and cnames:
         print("\n--- CNAME ---")
         for source, target in sorted(cnames.items()):
             print(f"  {source} -> {target}")
 
-    # 6. Export Graphviz (automatique)
+    # Export Graphviz (automatique)
     dot_file = f"{domain.replace('.', '_')}_diagram.dot"
     export_graphviz(dot_file, domain, results)
     print(f"\n[+] Fichier DOT : {dot_file}")
