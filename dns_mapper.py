@@ -41,9 +41,9 @@ def resolve(domain: str, rtype: str) -> List[Any]:
 
 def resolve_ips(domain: str) -> Set[str]:
     #  enregistrements A et AAAA pour un domaine
-    return {r.to_text() 
+    return {r.to_text()
             for t in ("A", "AAAA")
-              for r in resolve(domain, t)}
+            for r in resolve(domain, t)}
 
 
 def reverse_dns(ip: str) -> Optional[str]:
@@ -102,7 +102,7 @@ def parse_txt(domain: str) -> Set[str]:
 
 
 def enumerate_subdomains(domain: str) -> Set[str]:
-# les ss-domaines courants
+    # les ss-domaines courants
     words = [
         "www", "api", "mail", "shop", "admin", "dev", "test", "staging",
         "prod", "app", "web", "backend", "frontend", "mobile", "blog",
@@ -326,12 +326,12 @@ def main():
     print(f"\n=== RAPPORT {domain} ===")
     neighbor_list = [n for neighbor_ips in neighbors.values()
                      for n in neighbor_ips]
-    
+
     # Déterminer quoi afficher
-    show_all = args.all or not any([args.ips, args.reverse, args.neighbors, 
-                                     args.subdomains, args.records, args.srv, 
-                                     args.cname, args.parents])
-    
+    show_all = args.all or not any([args.ips, args.reverse, args.neighbors,
+                                    args.subdomains, args.records, args.srv,
+                                    args.cname, args.parents])
+
     sections = [
         ("IPs", ips, args.ips or show_all),
         ("Reverse", reverse.values(), args.reverse or show_all),
@@ -341,7 +341,7 @@ def main():
         ("SRV", srv, args.srv or show_all),
         ("Parents", parents, args.parents or show_all)
     ]
-    
+
     for name, data, show in sections:
         if show and data:
             print(f"\n--- {name} ---")
