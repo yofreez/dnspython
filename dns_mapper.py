@@ -57,7 +57,7 @@ def get_srv(d: str) -> Set[str]:
 
 def get_txt(d: str) -> Set[str]:
     extracted = set()
-    pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+    pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}") # tt ce qui resseble a un domaine 
     for r in resolve(d, "TXT"):
         for match in pattern.findall(r.to_text()):
             if match != d and "." in match:
@@ -104,11 +104,11 @@ def get_parents(d: str) -> Set[str]:
     ext = tldextract.extract(d)
     if not ext.suffix:
         return set()
-    reg, parents = f"{ext.domain}.{ext.suffix}", set()
+    reg, parents = f"{ext.domain}.{ext.suffix}", set() # domain racine 
     if d == reg:
         return parents
     parts, curr = ext.subdomain.split("."), reg
-    for part in reversed(parts):
+    for part in reversed(parts):   # boucle de reconstrution 
         candidate = f"{part}.{curr}"
         if candidate != d:
             parents.add(candidate)
@@ -117,7 +117,7 @@ def get_parents(d: str) -> Set[str]:
 
 
 def scan(domain: str, depth: int = 100) -> dict:
-    queue, seen = [domain], set()
+    queue, seen = [domain], set() # fifo 
     results = {k: ({} if k in ["CNAME", "Reverse", "Neighbors"] else set())
                for k in ["IPs", "MX", "NS", "SRV", "TXT", "CNAME", "Parents", "Subs", "Reverse", "Neighbors"]}
 
@@ -158,7 +158,7 @@ def scan(domain: str, depth: int = 100) -> dict:
             if is_list:
                 results[key].update(data)
                 queue.extend(data)
-            else:  # Single item (CNAME)
+            else:  #  (CNAME)
                 results[key][curr] = data
                 queue.append(data)
 
@@ -173,7 +173,6 @@ def generate_markdown(domain: str, res: dict, depth: int, args=None):
         show_all = True
     else:
         # Si --all est passé, afficher tout
-        # Sinon, afficher seulement si un flag est activé
         any_flag = (args.subs or args.mx or args.ns or args.srv or args.txt or args.cname or
                     args.parents or args.ips or args.reverse or args.neighbors or args.all)
         show_all = args.all if any_flag else True
@@ -260,48 +259,38 @@ def generate_markdown(domain: str, res: dict, depth: int, args=None):
 # Graphviz
 
 def export_graphviz(fname: str, main: str, data: dict):
+    def cluster(name, color, nodes):
+        if not nodes:
+            return []
+        lines = [f'subgraph cluster_{name} {{ label="{name.upper()}"; style=dashed; color="{color}";']
+        for n in nodes:
+            lines.append(f'"{n}" [style=filled, fillcolor="{color}20"];')
+            lines.append(f'"{main}" -> "{n}";')
+        lines.append("}")
+        return lines
+
     lines = [
-        'digraph G { rankdir=TB; nodesep=0.8; ranksep=1.0; graph [bgcolor="#FFF", splines=ortho];',
-        'node [fontname="Verdana", fontsize=10, style="filled,rounded", penwidth=2];',
-        f'"{main}" [shape=doubleoctagon, fillcolor="#FFD670", color="#E67E22", fontsize=14];'
-    ]
-    
-    # Config styles : (Clé, Couleur, Forme, Label Arc, Cluster?)
-    styles = [
-        ("subdomains", "#D7F9FF", "#4DA3FF", "ellipse", "sub", True),
-        ("domains", "#D7FFD7", "#28A745", "hexagon", "dns", True),
-        ("srv", "#EAD7FF", "#6F42C1", "component", "srv", False),
-        ("ips", "#FFD7D7", "#FF6B6B", "box", "ip", True),
-        ("parents", "#F0F0F0", "#6C757D", "diamond", "parent", False)
+        'digraph G {',
+        'rankdir=TB;',
+        'nodesep=0.8;',
+        'node [shape=ellipse, fontname="Verdana", fontsize=10];',
+        f'"{main}" [shape=doubleoctagon, style=filled, fillcolor="#FFD670"];'
     ]
 
-    for key, fill, stroke, shape, label, cluster in styles:
-        items = data.get(key, [])
-        if not items:
-            continue
-        
-        if cluster:
-            lines.append(f'subgraph cluster_{key} {{ label="{key.upper()}"; style=dashed; color="{stroke}";')
-        
-        for item in items:
-            lines.append(f'"{item}" [fillcolor="{fill}", color="{stroke}", shape={shape}];')
-            # Sens flèche inversé pour Parents
-            arrow = f'"{item}" -> "{main}" [dir=back' if key == "parents" else f'"{main}" -> "{item}" ['
-            lines.append(f'{arrow} color="{stroke}", label="{label}"];')
-            
-        if cluster:
-            lines.append('}')
+    lines += cluster("subdomains", "#4DA3FF", data.get("subdomains", []))
+    lines += cluster("domains", "#28A745", data.get("domains", []))
+    lines += cluster("ips", "#FF6B6B", data.get("ips", []))
+    lines += cluster("parents", "#6C757D", data.get("parents", []))
 
-    # CNAME & Voisins
+    # CNAME
     for s, t in data.get("cname_map", {}).items():
-        lines.append(f'"{s}" -> "{t}" [color="orange", label="cname"]; '
-                     f'"{s}" [shape=parallelogram, fillcolor="#FFE4B5"];')
-    
-    for ip, neighbors in data.get("neighbors", {}).items():
-        for n in neighbors:
+        lines.append(f'"{s}" -> "{t}" [label="CNAME", color="orange"];')
+
+    # Neighbors
+    for ip, neighs in data.get("neighbors", {}).items():
+        for n in neighs:
             n_clean = n.split()[0]
-            lines.append(f'"{ip}" -> "{n_clean}" [style=dashed, color="red"]; '
-                         f'"{n_clean}" [style="dashed", shape=box];')
+            lines.append(f'"{ip}" -> "{n_clean}" [style=dashed, color="red"];')
 
     lines.append("}")
     
