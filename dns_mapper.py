@@ -12,7 +12,7 @@ import dns.resolver
 import dns.reversename
 import tldextract
 
-# Config DNS
+
 RESOLVER = dns.resolver.Resolver()
 RESOLVER.timeout = 2.0
 RESOLVER.lifetime = 2.0
@@ -56,8 +56,10 @@ def get_srv(d: str) -> Set[str]:
 
 
 def get_txt(d: str) -> Set[str]:
-    extracted = set()
-    pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}") # tt ce qui resseble a un domaine 
+    """Extrait les domaines des enregistrements TXT."""
+    extracted: Set[str] = set()
+    # Pattern pour extraire les domaines des records TXT
+    pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     for r in resolve(d, "TXT"):
         for match in pattern.findall(r.to_text()):
             if match != d and "." in match:
@@ -123,7 +125,7 @@ def scan(domain: str, depth: int = 100) -> dict:
 
     print(f"[*] Scan de {domain} (profondeur: {depth})...")
 
-    # Configuration des scanners : (Clé Résultats, Fonction, Est-ce une liste ?)
+    #(Clé Résultats, Fonction, Est-ce une liste ?)
     domain_scanners = [
         ("IPs", get_ips, True), ("MX", get_mx, True), ("NS", get_ns, True),
         ("SRV", get_srv, True), ("TXT", get_txt, True), ("Parents", get_parents, True),
@@ -149,7 +151,7 @@ def scan(domain: str, depth: int = 100) -> dict:
         except ValueError:
             pass
 
-        # Si c'est un Domaine
+        
         for key, func, is_list in domain_scanners:
             data = func(curr)
             if not data:
@@ -168,11 +170,10 @@ def scan(domain: str, depth: int = 100) -> dict:
 def generate_markdown(domain: str, res: dict, depth: int, args=None):
     fname = f"{domain.replace('.', '_')}_report.md"
 
-    # Déterminer quoi afficher (tout par défaut, sauf si args spécifiques)
+
     if args is None:
         show_all = True
     else:
-        # Si --all est passé, afficher tout
         any_flag = (args.subs or args.mx or args.ns or args.srv or args.txt or args.cname or
                     args.parents or args.ips or args.reverse or args.neighbors or args.all)
         show_all = args.all if any_flag else True
@@ -192,7 +193,6 @@ def generate_markdown(domain: str, res: dict, depth: int, args=None):
     
     sections = []
     
-    # Section Domaines
     domain_subsections = []
     if show["subs"]:
         domain_subsections.append(("Subs", "Sous-domaines"))
@@ -212,7 +212,7 @@ def generate_markdown(domain: str, res: dict, depth: int, args=None):
     if domain_subsections:
         sections.append(("Domaines", domain_subsections))
     
-    # Section IPs
+
     ip_subsections = []
     if show["ips"]:
         ip_subsections.append(("IPs", "IPs Résolues"))
@@ -282,11 +282,11 @@ def export_graphviz(fname: str, main: str, data: dict):
     lines += cluster("ips", "#FF6B6B", data.get("ips", []))
     lines += cluster("parents", "#6C757D", data.get("parents", []))
 
-    # CNAME
+    
     for s, t in data.get("cname_map", {}).items():
         lines.append(f'"{s}" -> "{t}" [label="CNAME", color="orange"];')
 
-    # Neighbors
+   
     for ip, neighs in data.get("neighbors", {}).items():
         for n in neighs:
             n_clean = n.split()[0]
@@ -297,7 +297,7 @@ def export_graphviz(fname: str, main: str, data: dict):
     with open(fname, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     
-    # Recherche Dot & Compilation
+
     paths = [r"C:\Program Files\Graphviz\bin\dot.exe", r"C:\Program Files (x86)\Graphviz\bin\dot.exe"]
     dot = shutil.which("dot") or next((p for p in paths if os.path.exists(p)), None)
 
@@ -335,7 +335,7 @@ def main():
     res = scan(args.domain, args.scan)
     generate_markdown(args.domain, res, args.scan, args)
 
-    # Filtrage intelligent pour le graphe
+
     graph_data = {
         "ips": list(res["IPs"])[:15],
         "subdomains": [s for s in res["Subs"] if args.domain in s][:15],
