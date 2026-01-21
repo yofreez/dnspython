@@ -1,0 +1,26 @@
+digraph G {
+  rankdir=LR;
+  nodesep=0.6; ranksep=1.0;
+  graph [bgcolor="#FFFFFF", splines=curved, overlap=false];
+  node [fontname="Verdana", fontsize=10, style="filled,rounded", penwidth=1.5];
+  edge [fontname="Verdana", fontsize=8, penwidth=1.2, arrowsize=0.8];
+  "example.com" [shape=doubleoctagon, fillcolor="#FFD670", color="#E67E22", fontsize=14, fontcolor="#333333", width=2];
+  "2606:4700::6812:1b78" [label="2606:4700::6812:1b78", fillcolor="#FFD7D7", color="#FF6B6B", shape=box];
+  "example.com" -> "2606:4700::6812:1b78" [color="#FF6B6B", fontcolor="#FF6B6B", label="IP"];
+  "104.18.26.120" [label="104.18.26.120", fillcolor="#FFD7D7", color="#FF6B6B", shape=box];
+  "example.com" -> "104.18.26.120" [color="#FF6B6B", fontcolor="#FF6B6B", label="IP"];
+  "104.18.27.120" [label="104.18.27.120", fillcolor="#FFD7D7", color="#FF6B6B", shape=box];
+  "example.com" -> "104.18.27.120" [color="#FF6B6B", fontcolor="#FF6B6B", label="IP"];
+  "2606:4700::6812:1a78" [label="2606:4700::6812:1a78", fillcolor="#FFD7D7", color="#FF6B6B", shape=box];
+  "example.com" -> "2606:4700::6812:1a78" [color="#FF6B6B", fontcolor="#FF6B6B", label="IP"];
+  "www.example.com" [label="www.example.com", fillcolor="#D7F9FF", color="#4DA3FF", shape=ellipse];
+  "example.com" -> "www.example.com" [color="#4DA3FF", fontcolor="#4DA3FF", label="Sub"];
+  "" [label="", fillcolor="#D7FFD7", color="#28A745", shape=hexagon];
+  "example.com" -> "" [color="#28A745", fontcolor="#28A745", label="Record"];
+  "hera.ns.cloudflare.com" [label="hera.ns.cloudflare.com", fillcolor="#D7FFD7", color="#28A745", shape=hexagon];
+  "example.com" -> "hera.ns.cloudflare.com" [color="#28A745", fontcolor="#28A745", label="Record"];
+  "elliott.ns.cloudflare.com" [label="elliott.ns.cloudflare.com", fillcolor="#D7FFD7", color="#28A745", shape=hexagon];
+  "example.com" -> "elliott.ns.cloudflare.com" [color="#28A745", fontcolor="#28A745", label="Record"];
+  "ns.cloudflare.com" [label="ns.cloudflare.com", fillcolor="#F0F0F0", color="#6C757D", shape=diamond];
+  "example.com" -> "ns.cloudflare.com" [color="#6C757D", fontcolor="#6C757D", label="Parent"];
+}

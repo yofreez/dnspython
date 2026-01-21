@@ -248,7 +248,122 @@ def export_graphviz(
         print(f"[!] Le fichier DOT est quand même sauvegardé : {filename}")
 
 
-# -------------
+# -------------------------
+# Scan Function
+# -------------------------
+
+
+def scan(domaine: str, profondeur: int) -> None:
+    def is_ip(v):
+        try: ipaddress.ip_address(v); return True
+        except: return False
+    
+    file_attente = [domaine]
+    already_seen = set()
+    results = {"IPs": set(), "MX": set(), "SOA": set(), "CNAME": {}, "SRV": set(), 
+               "TXT": set(), "NS": set(), "Parents": set(), "Sous-domaines": set(),
+               "Reverse DNS": {}, "Voisins IP": {}}
+    
+    print(f"--- Scan en cours de {domaine} avec une profondeur de {profondeur} ---\n")
+
+    while file_attente and len(already_seen) < profondeur:
+        workon = file_attente.pop(0)
+        if workon in already_seen: continue
+        print(f"[+] Traitement : {workon}")
+        already_seen.add(workon)
+        
+        if is_ip(workon):
+            rdns = reverse_dns(workon)
+            if rdns: 
+                results["Reverse DNS"][workon] = rdns
+                file_attente.append(rdns)
+            neighbors = scan_ip_neighbors(workon)
+            if neighbors:
+                results["Voisins IP"][workon] = neighbors
+        else:
+            ips = resolve_ips(workon)
+            if ips: 
+                results["IPs"].update(ips)
+                file_attente.extend(ips)
+            
+            mx_records = {r.exchange.to_text().rstrip(".") for r in resolve(workon, "MX")}
+            if mx_records: 
+                results["MX"].update(mx_records)
+                file_attente.extend(mx_records)
+            
+            _, ns_records, _ = scan_records(workon)
+            if ns_records: 
+                results["NS"].update(ns_records)
+                file_attente.extend(ns_records)
+            
+            soa = {r.to_text() for r in resolve(workon, "SOA")}
+            results["SOA"].update(soa)
+            
+            cname = resolve_cname(workon)
+            if cname: 
+                results["CNAME"][workon] = cname
+                file_attente.append(cname)
+            
+            _, _, srv_records = scan_records(workon)
+            if srv_records: 
+                results["SRV"].update(srv_records)
+                file_attente.extend(srv_records)
+            
+            txt = parse_txt(workon)
+            if txt: 
+                results["TXT"].update(txt)
+                file_attente.extend(txt)
+            
+            parents = get_parent_domains(workon)
+            if parents: 
+                results["Parents"].update(parents)
+                file_attente.extend(parents)
+            
+            subs = enumerate_subdomains(workon)
+            if subs: 
+                results["Sous-domaines"].update(subs)
+                file_attente.extend(subs)
+    
+    print(f"\n\n{'='*60}")
+    print(f"RAPPORT POUR {domaine}")
+    print(f"{'='*60}\n")
+    
+    print("--- DOMAINES ---")
+    for key in ["Sous-domaines", "MX", "NS", "SRV", "TXT", "Parents"]:
+        if results[key]:
+            print(f"\n{key}:")
+            for item in sorted(results[key]):
+                print(f"  - {item}")
+    
+    if results["CNAME"]:
+        print(f"\nCNAME:")
+        for src, dst in sorted(results["CNAME"].items()):
+            print(f"  - {src} -> {dst}")
+    
+    if results["SOA"]:
+        print(f"\nSOA:")
+        for item in sorted(results["SOA"]):
+            print(f"  - {item}")
+    
+    print("\n--- IPs ---")
+    if results["IPs"]:
+        print(f"\nAdresses IP:")
+        for ip in sorted(results["IPs"]):
+            print(f"  - {ip}")
+    
+    if results["Reverse DNS"]:
+        print(f"\nReverse DNS:")
+        for ip, rdns in sorted(results["Reverse DNS"].items()):
+            print(f"  - {ip} -> {rdns}")
+    
+    if results["Voisins IP"]:
+        print(f"\nVoisins IP:")
+        for ip, neighbors in sorted(results["Voisins IP"].items()):
+            for n in neighbors:
+                print(f"  - {ip} voisin: {n}")
+
+
+# -------------------------
 # Main
 # -------------------------
 
@@ -277,92 +392,9 @@ def main():
             return
 
     print(f"[*] Analyse de : {domain}\n")
-
-    # Collecte
-    ips = resolve_ips(domain)
-    mx, ns, srv = scan_records(domain)
-    txt_domains = parse_txt(domain)
-    subdomains = enumerate_subdomains(domain)
-
-    # CNAME - Scanner tous les domaines trouvés
-    cnames = {}
-    all_to_check = subdomains.union({domain})
-    for d in all_to_check:
-        cname_target = resolve_cname(d)
-        if cname_target:
-            cnames[d] = cname_target
-
-    # Reverse & Voisins
-    reverse = {}
-    neighbors = {}
-    for ip in ips:
-        r = reverse_dns(ip)
-        if r:
-            reverse[ip] = r
-        neighbors[ip] = scan_ip_neighbors(ip)
-
-    # Parents
-    all_found = (subdomains.union(mx).union(ns).union(srv)
-                 .union(txt_domains).union({domain}))
-    parents = set()
-    for d in all_found:
-        parents.update(get_parent_domains(d))
-
-    # On regroupe MX, NS, TXT dans "domains" pour simplifier le graphe
-    other_domains = mx.union(ns).union(txt_domains)
-
-    results = {
-        "ips": ips,
-        "reverse": reverse,
-        "neighbors": neighbors,
-        "subdomains": subdomains,
-        "srv": srv,
-        "cname": set(cnames.values()),
-        "domains": other_domains,
-        "parents": parents
-    }
-
-    #  Affichage conditionnel
-    print(f"\n=== RAPPORT {domain} ===")
-    neighbor_list = [n for neighbor_ips in neighbors.values()
-                     for n in neighbor_ips]
-
-    # Déterminer quoi afficher
-    show_all = args.all or not any([args.ips, args.reverse, args.neighbors,
-                                    args.subdomains, args.records, args.srv,
-                                    args.cname, args.parents])
-
-    sections = [
-        ("IPs", ips, args.ips or show_all),
-        ("Reverse", reverse.values(), args.reverse or show_all),
-        ("Voisins", neighbor_list, args.neighbors or show_all),
-        ("Sous-domaines", subdomains, args.subdomains or show_all),
-        ("Records (MX/NS/TXT)", other_domains, args.records or show_all),
-        ("SRV", srv, args.srv or show_all),
-        ("Parents", parents, args.parents or show_all)
-    ]
-
-    for name, data, show in sections:
-        if show and data:
-            print(f"\n--- {name} ---")
-            for x in sorted(data):
-                print(f"  {x}")
-
-    # Affichage spécial pour CNAME avec mapping
-    if (args.cname or show_all) and cnames:
-        print("\n--- CNAME ---")
-        for source, target in sorted(cnames.items()):
-            print(f"  {source} -> {target}")
-
-    # Export Graphviz (automatique)
-    dot_file = f"{domain.replace('.', '_')}_diagram.dot"
-    export_graphviz(dot_file, domain, results)
-    print(f"\n[+] Fichier DOT : {dot_file}")
-
-    # Export personnalisé si demandé
-    if args.graphviz and args.graphviz != dot_file:
-        export_graphviz(args.graphviz, domain, results)
-        print(f"[+] Fichier personnalisé : {args.graphviz}")
+    
+    profondeur = getattr(args, 'profondeur', 100)
+    scan(domain, profondeur)
 
 
 if __name__ == "__main__":
