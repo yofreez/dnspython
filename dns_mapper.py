@@ -5,396 +5,360 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set
 
 import dns.resolver
 import dns.reversename
 import tldextract
 
-# Config pour le resolveur
+# Config DNS
 RESOLVER = dns.resolver.Resolver()
 RESOLVER.timeout = 2.0
 RESOLVER.lifetime = 2.0
 
 
-def banner() -> None:
-    """Affiche la bannière du programme."""
+def banner():
     print(r"""
-====================================
-           DNS MAPPER
-====================================
-""")
+   ___  _  _ ___   __  __  _  ___  ___ ___ ___
+  |   \| \| / __| |  \/  |/_\ | _ \| _ \ __| _ \
+  | |) | .` \__ \ | |\/| / _ \|  _/|  _/ _||   /
+  |___/|_|\_|___/ |_|  |/_/ \_\_|  |_| |___|_|_\
+    """)
 
 
-# -------------------------
-#  Résolution DNS
-# -------------------------
-
+# Fonctions DNS de base
 
 def resolve(domain: str, rtype: str) -> List[Any]:
     try:
         return list(RESOLVER.resolve(domain, rtype))
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
-            dns.resolver.NoNameservers, dns.resolver.Timeout):
+    except:
         return []
 
 
-def resolve_ips(domain: str) -> Set[str]:
-    #  enregistrements A et AAAA pour un domaine
-    return {r.to_text()
-            for t in ("A", "AAAA")
-            for r in resolve(domain, t)}
+def get_ips(d: str) -> Set[str]:
+    return {r.to_text() for t in ("A", "AAAA") for r in resolve(d, t)}
 
 
-def reverse_dns(ip: str) -> Optional[str]:
-    # Effectue une résolution DNS inverse pour une IP
-    try:
-        rev = dns.reversename.from_address(ip)
-        res = resolve(str(rev), "PTR")
-        return res[0].to_text().rstrip(".") if res else None
-    except (ValueError, IndexError):
-        return None
+def get_mx(d: str) -> Set[str]:
+    return {r.exchange.to_text().rstrip(".") for r in resolve(d, "MX")}
 
 
-def scan_ip_neighbors(ip: str) -> List[str]:
-    # Scan l'IP précédente et suivante
-    neighbors = []
-    try:
-        addr = ipaddress.ip_address(ip)
-        for delta in (-1, 1):
-            neighbor_ip = str(addr + delta)
-            rdns = reverse_dns(neighbor_ip)
-            if rdns:
-                neighbors.append(f"{neighbor_ip} ({rdns})")
-    except ValueError:
-        pass
-    return neighbors
+def get_ns(d: str) -> Set[str]:
+    return {r.target.to_text().rstrip(".") for r in resolve(d, "NS")}
 
 
-def resolve_cname(domain: str) -> Optional[str]:
-    records = resolve(domain, "CNAME")
-    return records[0].to_text().rstrip(".") if records else None
-
-
-def scan_records(domain: str) -> Tuple[Set[str], Set[str], Set[str]]:
-    # MX, NS et SRV.
-    mx = {r.exchange.to_text().rstrip(".") for r in resolve(domain, "MX")}
-    ns = {r.target.to_text().rstrip(".") for r in resolve(domain, "NS")}
-
-    srv_services = ["_sip._tcp", "_sip._udp", "_ldap._tcp",
-                    "_xmpp-server._tcp"]
+def get_srv(d: str) -> Set[str]:
     srv = set()
-    for s in srv_services:
-        for r in resolve(f"{s}.{domain}", "SRV"):
-            srv.add(r.target.to_text().rstrip("."))
-
-    return mx, ns, srv
+    for s in ["_sip._tcp", "_sip._udp", "_ldap._tcp", "_xmpp-server._tcp"]:
+        srv.update(r.target.to_text().rstrip(".") for r in resolve(f"{s}.{d}", "SRV"))
+    return srv
 
 
-def parse_txt(domain: str) -> Set[str]:
+def get_txt(d: str) -> Set[str]:
     extracted = set()
     pattern = re.compile(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-    for r in resolve(domain, "TXT"):
+    for r in resolve(d, "TXT"):
         for match in pattern.findall(r.to_text()):
-            if match != domain and "." in match:
+            if match != d and "." in match:
                 extracted.add(match)
     return extracted
 
 
-def enumerate_subdomains(domain: str) -> Set[str]:
-    # les ss-domaines courants
-    words = [
-        "www", "api", "mail", "shop", "admin", "dev", "test", "staging",
-        "prod", "app", "web", "backend", "frontend", "mobile", "blog",
-        "cdn", "static", "files", "ftp", "vpn", "remote", "secure",
-        "smtp", "pop", "webmail", "ns1", "ns2", "mx", "git", "gitlab",
-        "jenkins", "monitor", "db", "mysql", "redis", "auth", "sso",
-        "ldap", "support", "wiki", "portal", "intranet"
-    ]
-    found = set()
-    print(f"[*] Test de {len(words)} sous-domaines...")
-    for w in words:
-        full = f"{w}.{domain}"
-        if resolve(full, "A") or resolve(full, "AAAA"):
-            found.add(full)
-    return found
+def get_cname(d: str) -> Optional[str]:
+    res = resolve(d, "CNAME")
+    return res[0].to_text().rstrip(".") if res else None
 
 
-def get_parent_domains(domain: str) -> Set[str]:
-    ext = tldextract.extract(domain)
-    if not ext.suffix or not ext.domain:
+def get_reverse(ip: str) -> Optional[str]:
+    try:
+        res = resolve(str(dns.reversename.from_address(ip)), "PTR")
+        return res[0].to_text().rstrip(".") if res else None
+    except:
+        return None
+
+
+def get_neighbors(ip: str) -> List[str]:
+    neigh = []
+    try:
+        addr = ipaddress.ip_address(ip)
+        for d in (-1, 1):
+            nip = str(addr + d)
+            if r := get_reverse(nip):
+                neigh.append(f"{nip} ({r})")
+    except:
+        pass
+    return neigh
+
+
+def get_subdomains(d: str) -> Set[str]:
+    subs = set()
+    for w in ["www", "api", "mail", "shop", "admin", "dev", "test", "app", "web", "cdn"]:
+        full = f"{w}.{d}"
+        if get_ips(full):
+            subs.add(full)
+    return subs
+
+
+def get_parents(d: str) -> Set[str]:
+    ext = tldextract.extract(d)
+    if not ext.suffix:
         return set()
-
-    registered = f"{ext.domain}.{ext.suffix}"
-    parents: Set[str] = set()
-    if domain == registered:
+    reg, parents = f"{ext.domain}.{ext.suffix}", set()
+    if d == reg:
         return parents
-
-    parts = ext.subdomain.split(".")
-    curr = registered
+    parts, curr = ext.subdomain.split("."), reg
     for part in reversed(parts):
         candidate = f"{part}.{curr}"
-        if candidate != domain:
+        if candidate != d:
             parents.add(candidate)
         curr = candidate
     return parents
 
-# -------------------------
-# Graphviz
-# --------------
 
+def scan(domain: str, depth: int = 100) -> dict:
+    queue, seen = [domain], set()
+    results = {k: ({} if k in ["CNAME", "Reverse", "Neighbors"] else set())
+               for k in ["IPs", "MX", "NS", "SRV", "TXT", "CNAME", "Parents", "Subs", "Reverse", "Neighbors"]}
 
-def export_graphviz(
-    filename: str,
-    main_domain: str,
-    data: Dict[str, Any],
-    styles: Dict[str, Tuple[str, str, str, str]] = {
-        "ips": ("#FFD7D7", "#FF6B6B", "box", "IP"),
-        "subdomains": ("#D7F9FF", "#4DA3FF", "ellipse", "Sub"),
-        "domains": ("#D7FFD7", "#28A745", "hexagon", "Record"),
-        "srv": ("#EAD7FF", "#6F42C1", "component", "SRV"),
-        "cname": ("#FFE4B5", "#FFA500", "parallelogram", "CNAME"),
-        "parents": ("#F0F0F0", "#6C757D", "diamond", "Parent"),
-    },
-) -> None:
-    lines = [
-        'digraph G {',
-        '  rankdir=LR;',
-        '  nodesep=0.6; ranksep=1.0;',
-        '  graph [bgcolor="#FFFFFF", splines=curved, overlap=false];',
-        '  node [fontname="Verdana", fontsize=10, '
-        'style="filled,rounded", penwidth=1.5];',
-        '  edge [fontname="Verdana", fontsize=8, penwidth=1.2, '
-        'arrowsize=0.8];',
-        f'  "{main_domain}" [shape=doubleoctagon, '
-        f'fillcolor="#FFD670", color="#E67E22", fontsize=14, '
-        f'fontcolor="#333333", width=2];'
+    print(f"[*] Scan de {domain} (profondeur: {depth})...")
+
+    # Configuration des scanners : (Clé Résultats, Fonction, Est-ce une liste ?)
+    domain_scanners = [
+        ("IPs", get_ips, True), ("MX", get_mx, True), ("NS", get_ns, True),
+        ("SRV", get_srv, True), ("TXT", get_txt, True), ("Parents", get_parents, True),
+        ("Subs", get_subdomains, True), ("CNAME", get_cname, False)
     ]
 
-    # on fait les branches
-    for cat, (fill, stroke, shape, label) in styles.items():
-        for item in data.get(cat, []):
-            node_id = f'"{item}"'
-            lines.append(
-                f'  {node_id} [label="{item}", fillcolor="{fill}", '
-                f'color="{stroke}", shape={shape}];'
-            )
-            lines.append(
-                f'  "{main_domain}" -> {node_id} [color="{stroke}", '
-                f'fontcolor="{stroke}", label="{label}"];'
-            )
+    while queue and len(seen) < depth:
+        curr = queue.pop(0)
+        if curr in seen:
+            continue
+        seen.add(curr)
+        print(f" -> {curr}")
 
-    # les voisins
+        # Si c'est une IP
+        try:
+            ipaddress.ip_address(curr)
+            if r := get_reverse(curr):
+                results["Reverse"][curr] = r
+                queue.append(r)
+            if n := get_neighbors(curr):
+                results["Neighbors"][curr] = n
+            continue
+        except ValueError:
+            pass
+
+        # Si c'est un Domaine
+        for key, func, is_list in domain_scanners:
+            data = func(curr)
+            if not data:
+                continue
+            
+            if is_list:
+                results[key].update(data)
+                queue.extend(data)
+            else:  # Single item (CNAME)
+                results[key][curr] = data
+                queue.append(data)
+
+    return results
+
+
+def generate_markdown(domain: str, res: dict, depth: int, args=None):
+    fname = f"{domain.replace('.', '_')}_report.md"
+
+    # Déterminer quoi afficher (tout par défaut, sauf si args spécifiques)
+    if args is None:
+        show_all = True
+    else:
+        # Si --all est passé, afficher tout
+        # Sinon, afficher seulement si un flag est activé
+        any_flag = (args.subs or args.mx or args.ns or args.srv or args.txt or args.cname or
+                    args.parents or args.ips or args.reverse or args.neighbors or args.all)
+        show_all = args.all if any_flag else True
+
+    show = {
+        "subs": show_all or (args and args.subs),
+        "mx": show_all or (args and args.mx),
+        "ns": show_all or (args and args.ns),
+        "srv": show_all or (args and args.srv),
+        "txt": show_all or (args and args.txt),
+        "cname": show_all or (args and args.cname),
+        "parents": show_all or (args and args.parents),
+        "ips": show_all or (args and args.ips),
+        "reverse": show_all or (args and args.reverse),
+        "neighbors": show_all or (args and args.neighbors),
+    }
+    
+    sections = []
+    
+    # Section Domaines
+    domain_subsections = []
+    if show["subs"]:
+        domain_subsections.append(("Subs", "Sous-domaines"))
+    if show["mx"]:
+        domain_subsections.append(("MX", "MX"))
+    if show["ns"]:
+        domain_subsections.append(("NS", "NS"))
+    if show["srv"]:
+        domain_subsections.append(("SRV", "SRV"))
+    if show["txt"]:
+        domain_subsections.append(("TXT", "TXT"))
+    if show["cname"]:
+        domain_subsections.append(("CNAME", "CNAME"))
+    if show["parents"]:
+        domain_subsections.append(("Parents", "Parents"))
+    
+    if domain_subsections:
+        sections.append(("Domaines", domain_subsections))
+    
+    # Section IPs
+    ip_subsections = []
+    if show["ips"]:
+        ip_subsections.append(("IPs", "IPs Résolues"))
+    if show["reverse"]:
+        ip_subsections.append(("Reverse", "Reverse DNS"))
+    if show["neighbors"]:
+        ip_subsections.append(("Neighbors", "Voisins IP"))
+    
+    if ip_subsections:
+        sections.append(("IPs", ip_subsections))
+    
+    with open(fname, "w", encoding="utf-8") as f:
+        f.write(f"# DNS Report: {domain}\n**Date:** {datetime.now()}\n\n")
+        
+        for head, subs in sections:
+            f.write(f"## {head}\n")
+            for k, title in subs:
+                if res[k]:
+                    f.write(f"### {title}\n")
+                    if k in ["CNAME", "Reverse", "Neighbors"]:
+                        # Tables spéciales
+                        if k == "CNAME":
+                            f.write("| Src | Tgt |\n|---|---|\n")
+                            for s, t in res[k].items():
+                                f.write(f"| {s} | {t} |\n")
+                        elif k == "Reverse":
+                            f.write("| IP | Host |\n|---|---|\n")
+                            for i, h in res[k].items():
+                                f.write(f"| {i} | {h} |\n")
+                        elif k == "Neighbors":
+                            for ip, neighbors in sorted(res[k].items()):
+                                f.write(f"**{ip}**\n")
+                                for n in neighbors:
+                                    f.write(f"  - {n}\n")
+                    else:
+                        # Listes simples
+                        for x in sorted(res[k]):
+                            f.write(f"- `{x}`\n")
+                    f.write("\n")
+
+    print(f"[+] Rapport : {fname}")
+
+
+# Graphviz
+
+def export_graphviz(fname: str, main: str, data: dict):
+    lines = [
+        'digraph G { rankdir=TB; nodesep=0.8; ranksep=1.0; graph [bgcolor="#FFF", splines=ortho];',
+        'node [fontname="Verdana", fontsize=10, style="filled,rounded", penwidth=2];',
+        f'"{main}" [shape=doubleoctagon, fillcolor="#FFD670", color="#E67E22", fontsize=14];'
+    ]
+    
+    # Config styles : (Clé, Couleur, Forme, Label Arc, Cluster?)
+    styles = [
+        ("subdomains", "#D7F9FF", "#4DA3FF", "ellipse", "sub", True),
+        ("domains", "#D7FFD7", "#28A745", "hexagon", "dns", True),
+        ("srv", "#EAD7FF", "#6F42C1", "component", "srv", False),
+        ("ips", "#FFD7D7", "#FF6B6B", "box", "ip", True),
+        ("parents", "#F0F0F0", "#6C757D", "diamond", "parent", False)
+    ]
+
+    for key, fill, stroke, shape, label, cluster in styles:
+        items = data.get(key, [])
+        if not items:
+            continue
+        
+        if cluster:
+            lines.append(f'subgraph cluster_{key} {{ label="{key.upper()}"; style=dashed; color="{stroke}";')
+        
+        for item in items:
+            lines.append(f'"{item}" [fillcolor="{fill}", color="{stroke}", shape={shape}];')
+            # Sens flèche inversé pour Parents
+            arrow = f'"{item}" -> "{main}" [dir=back' if key == "parents" else f'"{main}" -> "{item}" ['
+            lines.append(f'{arrow} color="{stroke}", label="{label}"];')
+            
+        if cluster:
+            lines.append('}')
+
+    # CNAME & Voisins
+    for s, t in data.get("cname_map", {}).items():
+        lines.append(f'"{s}" -> "{t}" [color="orange", label="cname"]; '
+                     f'"{s}" [shape=parallelogram, fillcolor="#FFE4B5"];')
+    
     for ip, neighbors in data.get("neighbors", {}).items():
         for n in neighbors:
             n_clean = n.split()[0]
-            lines.append(
-                f'  "{n_clean}" [label="{n_clean}", '
-                f'fillcolor="#FFF0F0", color="#FF6B6B", shape=box, '
-                f'style="dashed,filled"];'
-            )
-            lines.append(
-                f'  "{ip}" -> "{n_clean}" [color="#FF6B6B", '
-                f'style=dashed, label="neighbor", constraint=false];'
-            )
+            lines.append(f'"{ip}" -> "{n_clean}" [style=dashed, color="red"]; '
+                         f'"{n_clean}" [style="dashed", shape=box];')
 
     lines.append("}")
-
-    # Écriture du fichier .dot
-    with open(filename, "w", encoding="utf-8") as f:
+    
+    with open(fname, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+    
+    # Recherche Dot & Compilation
+    paths = [r"C:\Program Files\Graphviz\bin\dot.exe", r"C:\Program Files (x86)\Graphviz\bin\dot.exe"]
+    dot = shutil.which("dot") or next((p for p in paths if os.path.exists(p)), None)
 
-    # RECHERCHE DE L'EXECUTABLE DOT (la galere)
-    dot_cmd = shutil.which("dot")  # Cherche dans le PATH système
-
-    # Si pas trouvé dans PATH, chercher dans dossiers Windows classiques
-    if not dot_cmd:
-        possible_paths = [
-            r"C:\Program Files\Graphviz\bin\dot.exe",
-            r"C:\Program Files (x86)\Graphviz\bin\dot.exe",
-        ]
-        # Ajoute dynamiquement d'autres versions
-        versions = ["2.44", "2.45", "2.46", "2.47", "2.48", "2.49",
-                    "2.50", "3.0", "4.0", "5.0", "6.0", "7.0",
-                    "8.0", "9.0", "10.0"]
-        for v in versions:
-            possible_paths.append(
-                rf"C:\Program Files\Graphviz {v}\bin\dot.exe"
-            )
-
-        for p in possible_paths:
-            if os.path.exists(p):
-                dot_cmd = p
-                break
-
-    # on compile
-    if dot_cmd:
-        jpg_file = filename.replace(".dot", ".jpg")
-        print(f"[*] Exécution de Graphviz via : {dot_cmd}")
+    if dot:
+        jpg = fname.replace(".dot", ".jpg")
         try:
-            subprocess.run(
-                [dot_cmd, "-Tjpg", "-Gdpi=150", filename, "-o", jpg_file],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            print(f"[+] Image générée avec succès : {jpg_file}")
-        except subprocess.CalledProcessError as e:
-            print("[!] Erreur lors de la génération JPG :")
-            print(e.stderr)
+            subprocess.run([dot, "-Tjpg", "-Gdpi=150", fname, "-o", jpg], check=True, capture_output=True)
+            print(f"[+] Image : {jpg}")
+        except:
+            print("[!] Erreur compilation JPG.")
     else:
-        print("[!] Graphviz non trouvé. Installez-le et ajoutez-le au "
-              "PATH, ou vérifiez C:\\Program Files\\Graphviz.")
-        print(f"[!] Le fichier DOT est quand même sauvegardé : {filename}")
+        print("[!] Graphviz introuvable.")
 
 
-# -------------------------
-# Scan Function
-# -------------------------
-
-
-def scan(domaine: str, profondeur: int) -> None:
-    def is_ip(v):
-        try: ipaddress.ip_address(v); return True
-        except: return False
-    
-    file_attente = [domaine]
-    already_seen = set()
-    results = {"IPs": set(), "MX": set(), "SOA": set(), "CNAME": {}, "SRV": set(), 
-               "TXT": set(), "NS": set(), "Parents": set(), "Sous-domaines": set(),
-               "Reverse DNS": {}, "Voisins IP": {}}
-    
-    print(f"--- Scan en cours de {domaine} avec une profondeur de {profondeur} ---\n")
-
-    while file_attente and len(already_seen) < profondeur:
-        workon = file_attente.pop(0)
-        if workon in already_seen: continue
-        print(f"[+] Traitement : {workon}")
-        already_seen.add(workon)
-        
-        if is_ip(workon):
-            rdns = reverse_dns(workon)
-            if rdns: 
-                results["Reverse DNS"][workon] = rdns
-                file_attente.append(rdns)
-            neighbors = scan_ip_neighbors(workon)
-            if neighbors:
-                results["Voisins IP"][workon] = neighbors
-        else:
-            ips = resolve_ips(workon)
-            if ips: 
-                results["IPs"].update(ips)
-                file_attente.extend(ips)
-            
-            mx_records = {r.exchange.to_text().rstrip(".") for r in resolve(workon, "MX")}
-            if mx_records: 
-                results["MX"].update(mx_records)
-                file_attente.extend(mx_records)
-            
-            _, ns_records, _ = scan_records(workon)
-            if ns_records: 
-                results["NS"].update(ns_records)
-                file_attente.extend(ns_records)
-            
-            soa = {r.to_text() for r in resolve(workon, "SOA")}
-            results["SOA"].update(soa)
-            
-            cname = resolve_cname(workon)
-            if cname: 
-                results["CNAME"][workon] = cname
-                file_attente.append(cname)
-            
-            _, _, srv_records = scan_records(workon)
-            if srv_records: 
-                results["SRV"].update(srv_records)
-                file_attente.extend(srv_records)
-            
-            txt = parse_txt(workon)
-            if txt: 
-                results["TXT"].update(txt)
-                file_attente.extend(txt)
-            
-            parents = get_parent_domains(workon)
-            if parents: 
-                results["Parents"].update(parents)
-                file_attente.extend(parents)
-            
-            subs = enumerate_subdomains(workon)
-            if subs: 
-                results["Sous-domaines"].update(subs)
-                file_attente.extend(subs)
-    
-    print(f"\n\n{'='*60}")
-    print(f"RAPPORT POUR {domaine}")
-    print(f"{'='*60}\n")
-    
-    print("--- DOMAINES ---")
-    for key in ["Sous-domaines", "MX", "NS", "SRV", "TXT", "Parents"]:
-        if results[key]:
-            print(f"\n{key}:")
-            for item in sorted(results[key]):
-                print(f"  - {item}")
-    
-    if results["CNAME"]:
-        print(f"\nCNAME:")
-        for src, dst in sorted(results["CNAME"].items()):
-            print(f"  - {src} -> {dst}")
-    
-    if results["SOA"]:
-        print(f"\nSOA:")
-        for item in sorted(results["SOA"]):
-            print(f"  - {item}")
-    
-    print("\n--- IPs ---")
-    if results["IPs"]:
-        print(f"\nAdresses IP:")
-        for ip in sorted(results["IPs"]):
-            print(f"  - {ip}")
-    
-    if results["Reverse DNS"]:
-        print(f"\nReverse DNS:")
-        for ip, rdns in sorted(results["Reverse DNS"].items()):
-            print(f"  - {ip} -> {rdns}")
-    
-    if results["Voisins IP"]:
-        print(f"\nVoisins IP:")
-        for ip, neighbors in sorted(results["Voisins IP"].items()):
-            for n in neighbors:
-                print(f"  - {ip} voisin: {n}")
-
-
-# -------------------------
 # Main
-# -------------------------
-
-
 def main():
-
     banner()
     parser = argparse.ArgumentParser()
-    parser.add_argument("domain", nargs="?", help="Domaine cible")
-    parser.add_argument("--graphviz", help="Fichier de sortie .dot")
+    parser.add_argument("domain", help="Domaine cible")
+    parser.add_argument("--scan", type=int, default=100, help="Profondeur du scan (défaut: 100)")
+    parser.add_argument("--graphviz", help="Sortie .dot personnalisée")
+    parser.add_argument("--subs", action="store_true", help="Afficher les sous-domaines")
+    parser.add_argument("--mx", action="store_true", help="Afficher les records MX")
+    parser.add_argument("--ns", action="store_true", help="Afficher les records NS")
+    parser.add_argument("--srv", action="store_true", help="Afficher les records SRV")
+    parser.add_argument("--txt", action="store_true", help="Afficher les records TXT")
+    parser.add_argument("--cname", action="store_true", help="Afficher les CNAME")
+    parser.add_argument("--parents", action="store_true", help="Afficher les domaines parents")
     parser.add_argument("--ips", action="store_true", help="Afficher les IPs")
     parser.add_argument("--reverse", action="store_true", help="Afficher les reverse DNS")
     parser.add_argument("--neighbors", action="store_true", help="Afficher les voisins IP")
-    parser.add_argument("--subdomains", action="store_true", help="Afficher les sous-domaines")
-    parser.add_argument("--records", action="store_true", help="Afficher les records (MX/NS/TXT)")
-    parser.add_argument("--srv", action="store_true", help="Afficher les records SRV")
-    parser.add_argument("--cname", action="store_true", help="Afficher les CNAME")
-    parser.add_argument("--parents", action="store_true", help="Afficher les domaines parents")
     parser.add_argument("--all", action="store_true", help="Afficher tous les résultats")
     args = parser.parse_args()
 
-    domain = args.domain
-    if not domain:
-        domain = input("Domaine : ").strip()
-        if not domain:
-            return
+    res = scan(args.domain, args.scan)
+    generate_markdown(args.domain, res, args.scan, args)
 
-    print(f"[*] Analyse de : {domain}\n")
+    # Filtrage intelligent pour le graphe
+    graph_data = {
+        "ips": list(res["IPs"])[:15],
+        "subdomains": [s for s in res["Subs"] if args.domain in s][:15],
+        "domains": list((res["MX"] | res["NS"] | res["TXT"]) - res["Parents"])[:15],
+        "srv": list(res["SRV"])[:5],
+        "parents": list(res["Parents"])[:5],
+        "cname_map": dict(list(res["CNAME"].items())[:10]),
+        "neighbors": dict(list(res["Neighbors"].items())[:5])
+    }
     
-    profondeur = getattr(args, 'profondeur', 100)
-    scan(domain, profondeur)
+    dot_file = args.graphviz if args.graphviz else f"{args.domain.replace('.', '_')}_map.dot"
+    export_graphviz(dot_file, args.domain, graph_data)
 
 
 if __name__ == "__main__":
